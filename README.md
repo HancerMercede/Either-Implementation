@@ -1,26 +1,51 @@
-# Either Pattern Implementation for C# 🛡️
+# Either Pattern for C# (.NET 10) 🛡️
 
-A professional, type-safe implementation of the **Either Monad** for .NET Core / .NET 8. This library promotes **Functional Programming** principles in C#, allowing you to handle errors as values rather than throwing exceptions.
+A high-performance, type-safe implementation of the **Either Monad** for **.NET 10**. This library leverages the latest features of C# to provide a robust alternative to exceptions for handling business logic and infrastructure failures.
 
-## 🚀 The Problem
-Traditional error handling in C# often relies on `try-catch` blocks and throwing exceptions. This leads to:
-- **Performance overhead:** Exceptions are computationally expensive.
-- **Polluted logic:** Controllers and services become filled with nested `if-else` or `try-catch` noise.
-- **Invisible control flows:** Exceptions act as "jumps" that are hard to track in the business logic.
-
-## ✨ The Solution: Either<L, R>
-The `Either` type represents a value of one of two possible types.
-- **`Left(L)`**: Represents the **Failure** or error state.
-- **`Right(R)`**: Represents the **Success** or value state.
-
-
+## 🚀 Why Use This in .NET 10?
+In modern distributed systems, performance and clarity are key. Using `Either` and `EitherAsync` makes failure states **explicit** in your method signatures, improving maintainability and reducing the overhead caused by exception bubbling in high-throughput applications.
 
 ---
 
-## 🛠️ Advanced Features & Implementation
+## ✨ Core Components
 
-### 1. The Service Layer (`EitherAsync` & Fluent API)
-Our implementation leverages `EitherAsync` to handle asynchronous operations and provides a **Fluent API** to chain business rules using `.Try()` and `.Ensure()`.
+### 1. The Monadic Foundation (Functional Records)
+The core is an `abstract record` that acts as a **Discriminated Union**. By using a private constructor, we ensure the hierarchy remains closed and type-safe.
+
+
+
+```csharp
+namespace Shared;
+
+public abstract record Either<L, R>
+{
+    private Either() { }
+
+    public sealed record Left(L Value) : Either<L, R>;
+    public sealed record Right(R Value) : Either<L, R>;
+    
+    public static Either<L, R> ToLeft(L value) => new Left(value);
+    public static Either<L, R> ToRight(R value) => new Right(value);
+
+    public T Match<T>(Func<L, T> onLeft, Func<R, T> onRight)
+        => this switch
+        {
+            Left l => onLeft(l.Value),
+            Right r => onRight(r.Value),
+            _ => throw new InvalidOperationException()
+        };
+}
+```
+
+### 2. Async Power: `EitherAsync`
+
+Optimized for asynchronous workflows in .NET 10, this record uses **Lazy Evaluation** to chain operations. It allows for "Railway-Oriented Programming," where logic flows through a success track or short-circuits to a failure track.
+
+#### Features:
+
+* **`Try`**: Safely wraps `Task` operations and maps exceptions to `Left`.
+* **`Ensure`**: Fluent validation to pivot from `Right` to `Left` based on a predicate.
+* **`FlatMap`**: Asynchronous chaining of multiple monadic operations.
 
 ```csharp
 public EitherAsync<string, Company> GetCompany(string id)
@@ -31,90 +56,46 @@ public EitherAsync<string, Company> GetCompany(string id)
     )
     .Ensure(c => c != null, "The company does not exist in the system");
 }
+
 ```
-Entiendo perfectamente, parece que hubo un corte en la generación anterior. Aquí tienes el **README.md** completo, de una sola vez, incluyendo todas las secciones fundamentales que desarrollamos: la arquitectura, el servicio asíncrono, el controlador y el núcleo técnico.
 
 ---
 
-### 2. Clean Controllers (The "Match" Pattern)
+## 💻 Real-World Example
 
-By using the `.Match()` method, controllers remain thin and focused only on mapping the result to an HTTP response. No `try-catch` needed.
+### Clean Controller Integration
+
+The `.Match()` method allows you to resolve the entire async chain into an `IActionResult` cleanly, keeping your endpoints free of boilerplate code.
 
 ```csharp
-[ApiController]
-[Route("api/[controller]")]
-public class CompanyController : ControllerBase
+[HttpGet("{id}")]
+public async Task<IActionResult> Get(string id)
 {
-    private readonly ICompanyService _service;
+    // Execute the lazy async chain
+    var result = await _service.GetCompany(id).Run(); 
 
-    public CompanyController(ICompanyService service) => _service = service;
-
-    [HttpGet("{id}")]
-    public async Task<IActionResult> Get(string id)
-    {
-        var result = await _service.GetCompany(id);
-
-        return await result.Match<IActionResult>(
-            error => BadRequest(new { Message = error }), // Handle Failure (Left)
-            company => Ok(company)                         // Handle Success (Right)
-        );
-    }
+    return result.Match<IActionResult>(
+        error => BadRequest(new { Message = error }), // Handle Failure
+        company => Ok(company)                         // Handle Success
+    );
 }
 
 ```
 
 ---
 
-## 🏗️ Technical Architecture
+## 📋 API Summary
 
-The core is built using an **Abstract Base Class** to ensure immutability and type safety.
-
-```csharp
-public abstract class Either<L, R>
-{
-    public abstract T Match<T>(Func<L, T> leftFn, Func<R, T> rightFn);
-}
-
-public sealed class Left<L, R> : Either<L, R>
-{
-    private readonly L _value;
-    public Left(L value) => _value = value;
-    public override T Match<T>(Func<L, T> leftFn, Func<R, T> rightFn) => leftFn(_value);
-}
-
-public sealed class Right<L, R> : Either<L, R>
-{
-    private readonly R _value;
-    public Right(R value) => _value = value;
-    public override T Match<T>(Func<L, T> leftFn, Func<R, T> rightFn) => rightFn(_value);
-}
-
-```
+| Method | Type | Description |
+| --- | --- | --- |
+| **Try** | Static | Executes a `Task` and catches exceptions into a `Left`. |
+| **Ensure** | Extension | Validates a condition; if false, transforms `Right` into `Left`. |
+| **Match** | Resolver | Unwraps the final value by providing handlers for both cases. |
+| **Map / FlatMap** | Chaining | Transforms or binds asynchronous results seamlessly. |
 
 ---
 
-## 📋 API Reference Summary
+## 🔧 Installation & Requirements
 
-| Method | Description |
-| --- | --- |
-| **Try** | Executes an async task and catches any exception, wrapping it in a `Left`. |
-| **Ensure** | Validates a condition. If false, transforms `Right` into `Left`. |
-| **Match** | Forces the developer to handle both `Left` and `Right` cases. |
-| **Map** | Transforms the success value (`Right`) while preserving the error. |
-
----
-
-## 🔧 Installation & Setup
-
-1. **Clone the repository:**
-```bash
-git clone [https://github.com/your-username/either-pattern-csharp.git](https://github.com/your-username/either-pattern-csharp.git)
-
-```
-
-
-2. **Build the solution:**
-```bash
-dotnet build
-
-```
+* **Framework:** .NET 10+
+* **C# Version:** 14 (Latest features)
